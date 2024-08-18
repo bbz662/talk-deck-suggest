@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk Deck Suggest</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #ffffff;
+            --accent-color: #6200ee;
+            --secondary-color: #03dac6;
+            --card-bg-color: #2d2d2d;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            text-align: center;
+            color: var(--accent-color);
+        }
+
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 300;
+        }
+
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 4px;
+            background-color: var(--card-bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: var(--text-color);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+
+        #output {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: var(--card-bg-color);
+            border-radius: 4px;
+            min-height: 100px;
+        }
+
+        .content-wrapper {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+            flex-grow: 1;
+        }
+
+        .column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column h2 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            margin-bottom: 1rem;
+            color: var(--secondary-color);
+        }
+
+        #talkHistory,
+        #suggestions {
+            flex-grow: 1;
+            overflow-y: auto;
+            background-color: var(--card-bg-color);
+            border-radius: 4px;
+            padding: 1rem;
+        }
+
+        .history-item,
+        .suggestion-item {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            transition: transform 0.3s ease;
+        }
+
+        .history-item:hover,
+        .suggestion-item:hover {
+            transform: translateY(-2px);
+        }
+
+        .history-item p,
+        .suggestion-item p {
+            margin: 0 0 0.5rem 0;
+        }
+
+        .history-item small,
+        .suggestion-item small {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Talk Deck Suggest</h1>
+        <div class="input-group">
+            <label for="apiKey">API Key</label>
+            <input type="password" id="apiKey" placeholder="Enter your Gemini API key">
+        </div>
+        <div class="input-group">
+            <label for="contextInput">Conversation Context</label>
+            <textarea id="contextInput" rows="4" placeholder="Enter conversation context here"></textarea>
+        </div>
+        <button id="startButton">Start voice recognition</button>
+        <div id="output"></div>
+        <div class="content-wrapper">
+            <div class="column">
+                <h2>Talk History</h2>
+                <div id="talkHistory"></div>
+            </div>
+            <div class="column">
+                <h2>Suggestions</h2>
+                <div id="suggestions"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * TalkDeckSuggest - A class to manage voice recognition and topic suggestions.
+         * This class handles speech recognition, API interactions, and UI updates.
+         */
+        class TalkDeckSuggest {
+            constructor() {
+                // Initialize UI elements and state
+                this.startButton = document.getElementById('startButton');
+                this.output = document.getElementById('output');
+                this.suggestions = document.getElementById('suggestions');
+                this.talkHistory = document.getElementById('talkHistory');
+                this.contextInput = document.getElementById('contextInput');
+                this.apiKeyInput = document.getElementById('apiKey');
+                this.outputMaxTokens = 150;
+                this.apiKey = '';
+                this.isRecognizing = false;
+
+                this.initSpeechRecognition();
+                this.bindEvents();
+            }
+            /**
+             * Initialize the speech recognition functionality.
+             * Checks for browser support and sets up the recognition object.
+             */
+            initSpeechRecognition() {
+                // Check for browser support and initialize recognition
+                if (!('webkitSpeechRecognition' in window)) {
+                    this.startButton.style.display = 'none';
+                    this.output.innerHTML = 'This browser does not support voice recognition feature.';
+                } else {
+                    this.recognition = new webkitSpeechRecognition();
+                    this.recognition.continuous = true;
+                    this.recognition.interimResults = true;
+                    this.recognition.lang = 'ja-JP';
+                }
+            }
+            /**
+             * Bind event listeners to various UI elements and recognition events.
+             */
+            bindEvents() {
+                // Attach event listeners
+                this.startButton.onclick = () => this.toggleRecognition();
+                this.apiKeyInput.addEventListener('change', (e) => this.apiKey = e.target.value);
+                if (this.recognition) {
+                    this.recognition.onstart = () => {
+                        this.isRecognizing = true;
+                        this.updateButtonState();
+                    };
+                    this.recognition.onend = () => {
+                        this.isRecognizing = false;
+                        this.updateButtonState();
+                    };
+                    this.recognition.onresult = (event) => this.handleSpeechResult(event);
+                    this.recognition.onerror = (event) => this.handleSpeechError(event);
+                }
+            }
+            /**
+             * Toggle the speech recognition on and off.
+             */
+            toggleRecognition() {
+                // Start or stop recognition based on current state
+                if (this.isRecognizing) {
+                    this.recognition.stop();
+                } else {
+                    this.recognition.start();
+                }
+            }
+            /**
+             * Update the start/stop button state based on recognition status.
+             */
+            updateButtonState() {
+                // Update button text and color
+                if (this.isRecognizing) {
+                    this.startButton.textContent = 'Stop voice recognition';
+                    this.startButton.style.backgroundColor = 'var(--secondary-color)';
+                } else {
+                    this.startButton.textContent = 'Start voice recognition';
+                    this.startButton.style.backgroundColor = 'var(--accent-color)';
+                }
+            }
+            /**
+              * Handle speech recognition results.
+              * @param {Event} event - The speech recognition result event.
+              */
+            handleSpeechResult(event) {
+                // Process interim and final transcripts
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                this.output.innerHTML = finalTranscript + '<i style="color: rgba(255, 255, 255, 0.6);">' + interimTranscript + '</i>';
+
+                if (finalTranscript) {
+                    this.addToTalkHistory(finalTranscript);
+                    this.getSuggestion();
+                }
+            }
+            /**
+             * Handle speech recognition errors.
+             * @param {Event} event - The speech recognition error event.
+             */
+            handleSpeechError(event) {
+                // Log error and update UI
+                console.error('Speech recognition error', event.error);
+                this.isRecognizing = false;
+                this.updateButtonState();
+            }
+
+            /**
+             * Get topic suggestions based on conversation history.
+             * @param {string} model - The AI model to use for suggestions.
+             */
+            async getSuggestion(model = "gemini-1.5-flash") {
+                // Validate API key, build prompt, and fetch suggestions
+                if (!this.apiKey) {
+                    this.addSuggestion('Please enter an API key.');
+                    return;
+                }
+
+                const historyItems = this.getRecentHistory();
+                const context = this.contextInput.value.trim();
+                const prompt = this.buildPrompt(context, historyItems);
+
+                try {
+                    const response = await this.fetchGeminiResponse(model, prompt);
+                    const newSuggestion = JSON.parse(response.candidates[0].content.parts[0].text);
+                    this.addSuggestion(newSuggestion.suggestion);
+                } catch (error) {
+                    console.error(`Error in getGeminiResponse (${model}):`, error);
+                    this.addSuggestion('Failed to get topic suggestion.');
+                }
+            }
+            /**
+             * Get the most recent conversation history.
+             * @returns {string} The recent conversation history.
+             */
+            getRecentHistory() {
+                // Retrieve and format recent history items
+                return Array.from(this.talkHistory.children)
+                    .slice(0, 20)
+                    .map(item => item.querySelector('p').textContent)
+                    .reverse()
+                    .join('\n');
+            }
+            /**
+             * Build the prompt for the AI model.
+             * @param {string} context - The conversation context.
+             * @param {string} historyItems - The recent conversation history.
+             * @returns {string} The formatted prompt.
+             */
+            buildPrompt(context, historyItems) {
+                // Construct prompt with context, history, and constraints
+                const schema = {
+                    name: "talk suggestion",
+                    schema: {
+                        type: "object",
+                        properties: {
+                            suggestion: { type: "string" },
+                        },
+                        required: ["suggestion"],
+                    }
+                };
+
+                return `Context: 
+                    ${context || 'no specific context'}
+
+                    Conversation History:
+                    ${historyItems}
+                    
+                    Json Schema:
+                    ${JSON.stringify(schema, null, 2)}
+                    
+                    Constraints:
+                    Suggestion must be in Japanese.
+
+                    Based on this context and conversation history, suggest a relevant topic or question to continue the conversation.`;
+            }
+
+            /**
+             * Fetch a response from the Gemini API.
+             * @param {string} model - The AI model to use.
+             * @param {string} prompt - The prompt to send to the model.
+             * @returns {Promise<Object>} The API response.
+             */
+            async fetchGeminiResponse(model, prompt) {
+                // Send request to Gemini API and handle response
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            maxOutputTokens: this.outputMaxTokens,
+                            responseMimeType: "application/json",
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(`${response.status} ${JSON.stringify(data, null, 2)}`);
+                }
+
+                return data;
+            }
+            /**
+             * Add a new item to the talk history.
+             * @param {string} text - The text to add to the history.
+             */
+            addToTalkHistory(text) {
+                // Create and insert new history element
+                const historyElement = this.createHistoryElement(text, 'history-item');
+                this.talkHistory.insertBefore(historyElement, this.talkHistory.firstChild);
+                this.sortElements(this.talkHistory, 'asc');
+            }
+            /**
+             * Add a new suggestion to the suggestions list.
+             * @param {string} text - The suggestion text to add.
+             */
+            addSuggestion(text) {
+                // Create and insert new suggestion element
+                const suggestionElement = this.createHistoryElement(text, 'suggestion-item');
+                this.suggestions.insertBefore(suggestionElement, this.suggestions.firstChild);
+                this.sortElements(this.suggestions);
+            }
+            /**
+             * Create a new history or suggestion element.
+             * @param {string} text - The text content of the element.
+             * @param {string} className - The CSS class for the element.
+             * @returns {HTMLElement} The created element.
+             */
+            createHistoryElement(text, className) {
+                // Create and return a new element with timestamp
+                const element = document.createElement('div');
+                element.className = `${className} fade-in`;
+                element.innerHTML = `
+                    <p>${text}</p>
+                    <small>${new Date().toLocaleString('en-US')}</small>
+                `;
+                element.dataset.timestamp = Date.now();
+                return element;
+            }
+            /**
+             * Sort elements in a container by timestamp.
+             * @param {HTMLElement} container - The container element to sort.
+             * @param {string} order - The sort order ('asc' or 'desc').
+             */
+            sortElements(container, order = 'desc') {
+                // Sort elements based on timestamp
+                const items = Array.from(container.children);
+                items.sort((a, b) => {
+                    const comparison = a.dataset.timestamp - b.dataset.timestamp;
+                    return order === 'asc' ? comparison : -comparison;
+                });
+                items.forEach(item => container.appendChild(item));
+            }
+        }
+
+        // Initialize the application when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new TalkDeckSuggest();
+        });
+    </script>
+</body>
+
+</html>
